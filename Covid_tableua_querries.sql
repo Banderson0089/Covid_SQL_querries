@@ -24,3 +24,16 @@ SELECT Location, Population, date, MAX(total_cases) as HighestInfectionCount, MA
 FROM PortfolioProject..covid_deaths$
 GROUP by Location, Population, date
 ORDER by location 
+
+--5. US rate over time
+SELECT iso_code, date, new_deaths, new_cases, (new_deaths/new_cases)*100 AS death_Rate
+FROM portfolioProject..covid_deaths$
+WHERE location = 'United States' AND new_deaths IS NOT NULL
+ORDER BY date 
+
+--6. Cases vs death rate by country
+SELECT location, MAX(total_deaths) AS Country_deaths, MAX(total_cases) AS Total_cases, (MAX(total_deaths)/MAX(total_cases))*100 AS deaths_per_cases
+FROM PortfolioProject..covid_deaths$
+GROUP BY location
+HAVING MAX(total_deaths) IS NOT NULL
+ORDER BY deaths_per_cases desc
