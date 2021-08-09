@@ -1,0 +1,14 @@
+USE AdventureWorksDW2014;
+GO
+
+Select * FROM DimCustomer
+
+Select EmployeeKey, FirstName, Lastname, Title, EmailAddress, BaseRate
+FROM DimEmployee
+WHERE Baserate Not In (Select MAX(Baserate) FROM DimEmployee)
+
+
+Select EmployeeKey, FirstName, Lastname, Title, EmailAddress, BaseRate
+FROM DimEmployee
+WHERE Baserate IN (Select Max(baserate) FROM DimEmployee GROUP BY Title)
+ORDER BY BaseRate desc
