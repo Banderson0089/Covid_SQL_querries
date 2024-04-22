@@ -1,0 +1,89 @@
+WITH cte_empi as
+(
+        select e.lpi, e.lpi_system_key, e.empi, e.lpi_system_key || '-' || e.lpi as source_patient_id 
+        from PRD_CDCM_DB.cdm.empi e
+        inner join PRD_CDCM_DB.cdcm.patient p
+        on e.lpi = p.source_patient_id and e.lpi_system_key = p.source_system_sk and p.del_ind=0
+        where nvl(e.rel_term_dt,'1/1/9999')>CURRENT_DATE
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY p.source_patient_id, p.source_system_sk ORDER BY nvl(e.REL_CREATED_DT,'1/1/9999') DESC, e.EMPI ) = 1 
+        union
+        select p.lpi, p.lpi_system_key, e.empi,e.lpi_system_key || '-' || e.lpi as source_patient_id from PRD_CDCM_DB.cdm.empi e
+        inner join PRD_CDCM_DB.cdm.member p
+        on e.lpi = p.lpi and e.lpi_system_key = e.lpi_system_key = p.lpi_system_key and p.del_ind=0
+        where nvl(e.rel_term_dt,'1/1/9999')>CURRENT_DATE
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY p.lpi, p.lpi_system_key ORDER BY nvl(e.REL_CREATED_DT,'1/1/9999') DESC, e.EMPI ) = 1 
+),
+cte_gmpi_lpi AS ( 
+        SELECT empi.lpi, source_patient_id, empi, PERSON_ID GMPI 
+        FROM cte_empi empi
+        JOIN CDCM_ELT.WELLMED_GMPI wg ON empi.lpi = wg.AUXID 
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY empi.lpi ORDER BY WG.DATE_LOADED_YYYYMMDD000000 DESC, WG.PERSON_ID ) = 1 
+), 
+cte_gmpi_empi AS ( 
+		SELECT empi.lpi, empi.source_patient_id, max(ge.gmpi) AS GMPI 
+		FROM cte_empi empi
+		LEFT JOIN CDCM_ELT.WELLMED_GMPI gl ON empi.lpi = gl.AUXID 
+		JOIN cte_gmpi_lpi ge ON empi.empi = ge.empi 
+		WHERE gl.PERSON_ID IS NULL 
+		GROUP BY empi.lpi,empi.source_patient_id 
+), 
+cte_gmpi AS ( 
+		SELECT lpi, source_patient_id, gmpi 
+		FROM CTE_GMPI_LPI 
+		UNION 
+		SELECT lpi, source_patient_id, gmpi 
+		FROM cte_gmpi_empi 
+),
+cte_sbr AS
+(
+		SELECT c.enterprise_id, p.source_patient_id, ce.empi as NG_EMPI, cg.gmpi as WM_GMPI,  cc.source_patient_id as SBR_EMPI, ccc.source_patient_id as SBR_GMPI
+        from PRD_CDCM_DB.cdcm_refined.patient p
+        left join PRD_CDCM_DB.cdcm_refined_elt.patient_sbr_crosswalk c
+        on p.source_patient_id=c.source_patient_id and p.source_system_sk=c.source_system_sk and c.del_ind=0 and nvl(c.record_end_dt,'1/1/9999') > CURRENT_DATE 
+  
+        left join PRD_CDCM_DB.cdcm_refined.source_system ss
+        on c.source = ss.source_system_abbr	and c.del_ind=0 and nvl(c.record_end_dt,'1/1/9999') > CURRENT_DATE   
+        left join PRD_CDCM_DB.cdcm_refined_elt.patient_sbr_crosswalk cc
+        on c.enterprise_id = cc.enterprise_id and cc.del_ind=0 and nvl(cc.record_end_dt,'1/1/9999') > CURRENT_DATE and cc.source='DMG'        
+        left join PRD_CDCM_DB.cdcm_refined_elt.patient_sbr_crosswalk ccc
+        on c.enterprise_id = ccc.enterprise_id and ccc.del_ind=0 and nvl(ccc.record_end_dt,'1/1/9999') > CURRENT_DATE and ccc.source='WELLMED_GMPI' 
+        left join cte_empi ce
+       
+         on p.source_patient_id = ce.source_patient_id
+        left join cte_gmpi cg
+        on p.source_patient_id = cg.source_patient_id
+        where p.del_ind=0  
+ ), 
+cte_sbr_hicn as
+(
+        select  p.tenant_sk, s.enterprise_id, p.source_patient_id, s.SBR_EMPI, s.SBR_GMPI, s.NG_EMPI, s.WM_GMPI, SECURITY.DPAAS_DETOKEN_HICN_MBI(p.hicn_mbi)as hicn_mbi,
+        SECURITY.DPAAS_DETOKEN_NAME(p.First_Name) as First_Name, SECURITY.DPAAS_DETOKEN_NAME(p.Last_Name) as Last_Name, p.Birth_Date, e.HEALTH_PLAN_CARD_ID,
+        
+        max(nvl(e.record_end_dt,'1/1/9999')) as Record_End_Dt, max(p.aud_ins_dt) as aud_ins_dt
+        from PRD_CDCM_DB.cdcm_refined.patient p
+        left join "PRD_CDCM_DB"."CDCM_REFINED"."ELIGIBILITY_MATERIALIZED" e
+        on p.source_patient_id = e.source_patient_id
+        left join cte_sbr s
+        on p.source_patient_id =s.source_patient_id   
+        where p.del_ind=0
+        group by p.tenant_sk,s.enterprise_id, p.source_patient_id, s.SBR_EMPI, s.SBR_GMPI, s.NG_EMPI, s.WM_GMPI, SECURITY.DPAAS_DETOKEN_HICN_MBI(p.hicn_mbi), SECURITY.DPAAS_DETOKEN_NAME(p.First_Name), SECURITY.DPAAS_DETOKEN_NAME(p.Last_Name), p.Birth_Date, e.HEALTH_PLAN_CARD_ID --HealthPlanCardID 
+)
+
+--where tenant_sk in (8) and enterprise_id is null
+select distinct h.tenant_sk, t.tenant_abbr, ss.new_source_system_sk, ss.source_system_abbr, enterprise_id,source_patient_id,
+h.First_Name, h.Last_Name, 
+h.Birth_Date, h.HEALTH_PLAN_CARD_ID,
+NG_EMPI, WM_GMPI, SBR_EMPI,SBR_GMPI,hicn_mbi, Record_End_Dt, h.aud_ins_dt, datediff(day, h.aud_ins_dt, current_date) as Days,
+concat (ss.new_source_system_sk,'~',h.tenant_sk,'~',right(source_patient_id, len(source_patient_id) - charindex('-', source_patient_id))) as EIMP
+from cte_sbr_hicn h
+LEFT JOIN 
+(
+	SELECT *, CASE WHEN source_system_sk=610 THEN 37 ELSE source_system_sk END AS new_source_system_sk 
+	FROM PRD_CDCM_DB.cdcm_refined.source_system WHERE del_ind=0
+) ss
+on split_part(h.source_patient_id, '-', 1) = ss.new_source_system_sk
+LEFT JOIN PRD_CDCM_DB.cdcm_refined.tenant t
+ON h.tenant_sk = t.tenant_sk AND t.del_ind=0
+where h.tenant_sk in (6,7,8,9,10,12,14,15,16,17,18,24,26,27,28,36) and enterprise_id is null 
+and datediff(day, h.aud_ins_dt, current_date) > 5
+and nvl(record_end_dt,'1/1/9999') > (Select dateadd(month, -51, current_date()));
