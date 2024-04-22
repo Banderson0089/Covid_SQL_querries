@@ -1,0 +1,32 @@
+--Total Counts from latest batch
+with Val_RUN_DATETIME as (
+select market, domain, file_export, Run_Date, idrank
+    from (
+          Select Date_format((RUN_DATETIME),'yyyyMMdd') as Run_Date
+          , market, domain, file_export, dense_rank() over (partition by market, file_export, domain order by Date_format((RUN_DATETIME),'yyyyMMdd') desc) as idrank
+          FROM qa.cdos_validation_library
+          group by Date_format((RUN_DATETIME),'yyyyMMdd'), market,  file_export, domain
+          )
+  where IDrank <= 2
+)
+, ThisWeek(
+select v.Run_Date, q.market, q.domain, q.file_export, q.severity, q.validation, q.result  from qa.cdos_validation_library q
+inner join 
+val_run_datetime v on  v.market= q.market and v.domain = q.domain and v.file_export = q.file_export and v.run_date = Date_format((q.RUN_DATETIME),'yyyyMMdd')
+where v.idrank = 1
+)
+,LastWeek(
+select v.Run_Date, q.market, q.domain, q.file_export, q.severity, q.validation, q.result  from qa.cdos_validation_library q
+inner join 
+val_run_datetime v on  v.market= q.market and v.domain = q.domain and v.file_export = q.file_export and v.run_date = Date_format((q.RUN_DATETIME),'yyyyMMdd')
+where v.idrank = 2
+)
+select t.Run_Date as This_Week, l.Run_Date as Last_Week, t.file_export, t.market, t.domain, t.severity, t.validation, t.result as This_Week_Result
+,l.result as Last_Week_Result
+,t.result - l.result as delta
+,round(((t.result - l.result)/l.result)*100, 2) as delta_percentage
+from ThisWeek t
+inner join LastWeek l on t.market = l.market and t.domain = l.domain and t.file_export = l.file_export and  t.validation = l.validation 
+where t.severity = 'TOTAL COUNT' and t.file_export not like '%DATALAKE'and t.file_export not like '%DRY_RUN%' 
+AND t.MARKET in ('NY','CT','SC', 'IN', 'OH', 'GA', 'WI', 'OR', 'WA', 'VA', 'TN')
+order by t.market, t.file_export, t.validation
