@@ -1,14 +1,127 @@
-USE AdventureWorksDW2014;
-GO
+--Avg money spent on a order
+--Demostrate Operators
+Select (SUM(LineTotal)/(SUM(OrderQty))) as AvgSpent From Sales.SalesOrderDetail
 
-Select * FROM DimCustomer
+--Left Join vs Inner Join
+--Demostrate Joins
+Select count(*) from person.Person p
+left join sales.PersonCreditCard cc --count = 19972
+--inner join sales.PersonCreditCard cc --count = 19118
+on cc.BusinessEntityID = p.BusinessEntityID
 
-Select EmployeeKey, FirstName, Lastname, Title, EmailAddress, BaseRate
-FROM DimEmployee
-WHERE Baserate Not In (Select MAX(Baserate) FROM DimEmployee)
+--List the top 5 products by total Sales
+--Demostrate joins
+Select top 5 p.name, h.TotalDue, UnitPrice, OrderQty from Sales.SalesOrderDetail D
+	inner join Sales.SalesOrderHeader H on d.SalesOrderID = h.SalesOrderID
+	inner join Production.Product P on P.ProductID = d.ProductID
+	order by LineTotal desc;
+
+--Calculate the total sales amount for each month in 2013
+--Demostrate Operators, Functions, Aliasing
+Select Month(OrderDate) as Month_of_Order ,Round (sum(TotalDue),2) as Total_Sales from sales.SalesOrderHeader
+where year(orderDate) = 2013
+group by Month(OrderDate)
+order by Month_of_Order
+	
+--Calculate the total sales amount for each Bicycle frame
+--Demostrate joins, clauses, wildcards
+Select m.name as Bicycle_Type , p.ProductModelID,  Sum(h.TotalDue) as totalSales, count(d.OrderQty) as Number_of_Orders from Production.Product P
+	inner join Sales.SalesOrderDetail d on P.ProductID = d.ProductID
+	inner join sales.SalesOrderHeader h on H.SalesOrderID = d.SalesOrderID
+	inner join Production.ProductModel m on P.ProductModelID = m.ProductModelID
+	where m.name like '%Frame%'
+	group by p.ProductModelID, m.name
+	order by totalSales desc;
+
+--Calculate total sales in each Catagory in all stores and number of orders
+--Demostrate joins, operators
+select pc.Name, sum(h.TotalDue) as Total_Sales, count(d.OrderQty) as Count_of_Orders from sales.SalesOrderHeader h
+inner join sales.SalesOrderDetail d on d.SalesOrderID = h.SalesOrderID
+inner join Production.Product p on P.ProductID = d.ProductID
+inner join Production.ProductSubcategory psc on psc.ProductSubcategoryID = p.ProductSubcategoryID
+join Production.ProductCategory pc on psc.ProductCategoryID = pc.ProductCategoryID
+group by pc.Name
+order by Total_Sales desc
+
+--Find the top 10 customer with the highest average order amounts in 2014
+--Demostrate operators,functions, clauses
+select top 10 c.CustomerID, sum(h.TotalDue) as Total_Sales from sales.SalesOrderHeader h
+inner join sales.Customer c on c.CustomerID = h.CustomerID
+where YEAR(OrderDate) = 2014
+group by c.CustomerID
+Order by Total_Sales desc
+
+--using a CTE to get the max paid employee's role in each department
+--Demostrate CTE (Common Table Expression)
+With cte_max_paid  as (
+    Select
+        eph.BusinessEntityID,
+        MAX(eph.Rate) as max_payment
+    from
+        HumanResources.EmployeePayHistory as eph
+        group by eph.BusinessEntityID
+    ) 
+Select max(mp.max_payment)as max_Rate, D.GroupName, d.Name
+from cte_max_paid mp
+    inner join HumanResources.EmployeeDepartmentHistory edh on edh.BusinessEntityID = mp.BusinessEntityID
+	inner join HumanResources.Department d  on edh.DepartmentID = d.DepartmentID
+	group by  D.GroupName, d.Name
+	order by max_Rate desc
+
+--Get the number of orders placed by the top 50 customer in the US (by Total Sales)
+--Demostrate subqueries
+select top 50 p.FirstName, p.LastName, count(*) as number_of_Orders, sum(h.TotalDue)as Total_Sales from sales.SalesOrderHeader h
+inner join person.Person p on p.BusinessEntityID = h.CustomerID
+where BillToAddressID in 
+	(select AddressID from person.Address where StateProvinceID in 
+		(select StateProvinceID from person.StateProvince where CountryRegionCode = 'US'))
+group by p.LastName, p.FirstName
+order by Total_Sales desc
+
+--Show Sales numbers for each sales represenative annually
+--Demostrate CTE, operators,functions, clauses
+with CTE_Sales as
+	(select SalesPersonID, SalesOrderID, year(OrderDate) as SalesYear
+    from Sales.SalesOrderHeader
+    where SalesPersonID IS NOT NULL)
+select SalesPersonID,p.LastName, count(SalesOrderID) AS TotalSales, SalesYear
+from CTE_Sales s
+inner join Person.Person p on p.BusinessEntityID = s.SalesPersonID
+group by SalesYear, SalesPersonID, p.LastName
+order by SalesPersonID, SalesYear desc;
 
 
-Select EmployeeKey, FirstName, Lastname, Title, EmailAddress, BaseRate
-FROM DimEmployee
-WHERE Baserate IN (Select Max(baserate) FROM DimEmployee GROUP BY Title)
-ORDER BY BaseRate desc
+--Display the top 3 products in inventory and their respective location
+--Demostrate Window functions, subquery
+Select * From (
+    select i.ProductID, p.Name as Product_Name, i.LocationID, l.Name as Location_Name, i.Quantity, 
+           dense_rank() over (Partition by i.LocationID order by i.Quantity desc) as idRank  
+    from Production.ProductInventory i
+    inner join Production.Product p  on i.ProductID = p.ProductID 
+	inner join Production.Location l on i.LocationID = l.LocationID
+) dr
+Where idRank <= 3
+order by LocationID, idRank
+
+--Calculate the Salary Percentile of each employee in a given department
+--Demostrate Windows function
+select d.name as department_name, e.LastName, eph.Rate,
+Percent_Rank() over (partition by d.name order by eph.rate) as pstrank
+from HumanResources.EmployeeDepartmentHistory edh
+inner join person.Person e on e.BusinessEntityID = edh.BusinessEntityID
+inner join HumanResources.EmployeePayHistory eph on eph.BusinessEntityID = edh.BusinessEntityID
+inner join HumanResources.Department d  on edh.DepartmentID = d.DepartmentID
+order by d.name, rate desc
+
+--Find the average number of days between order date and ship date for each product catagory
+--Demostrate Functions, Operators
+select  distinct psc.name, AVG (DateDiff(dd, OrderDate, ShipDate)) as Time_To_Ship from sales.SalesOrderHeader h
+inner join sales.SalesOrderDetail d on d.SalesOrderID = h.SalesOrderID
+inner join Production.Product p on P.ProductID = d.ProductID
+inner join Production.ProductSubcategory psc on psc.ProductSubcategoryID = p.ProductSubcategoryID
+group by psc.name
+
+--update scripts
+--update Person.PersonPhone
+set PhoneNumber = 1-630-584-6338
+where BusinessEntityID = 120
