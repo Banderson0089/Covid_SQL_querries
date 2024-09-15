@@ -1,1 +1,1 @@
-Some of the SQL notebooks and work I have done in SSMS, DataBricks andSnowflake. Most of the samples are validation reporting and validation notebooks written in SQL
+Some of the SQL and python work I have done in online classes
